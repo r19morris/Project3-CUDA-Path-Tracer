@@ -147,9 +147,13 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
         // TODO: implement antialiasing by jittering the ray
+        thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+        thrust::uniform_real_distribution<float> u01(0, 1);
+
+
         segment.ray.direction = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
-            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
+            - cam.right * cam.pixelLength.x * (((float)x + u01(rng) - 0.5f) - (float)cam.resolution.x * 0.5f)
+            - cam.up * cam.pixelLength.y * (((float)y + u01(rng) - 0.5f) - (float)cam.resolution.y * 0.5f)
         );
 
         segment.pixelIndex = index;
@@ -279,6 +283,39 @@ __global__ void shadeFakeMaterial(
         }
     }
 }
+
+/* new shader */
+__global__ void shadeRealMaterial(
+    int iter,
+    int num_paths,
+    ShadeableIntersection* shadeableIntersections,
+    PathSegment* pathSegments,
+    Material* materials
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_paths) {
+        ShadeableIntersection intersection = shadeableIntersections[idx];
+        if (intersection.t > 0.0f) {
+
+            // rng?
+            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idex, 0);
+            thrust::uniform_real_distribution<float> u01(0, 1);
+
+            Material material = materials[intersection.materialId];
+            glm::vec3 materialColor = material.color;
+
+            if (material.emittance > 0.0f) {
+                pathSegments[idx].color *= (materialColor * material.emittance);
+            }
+            else {
+                glm::vec3 hitPoint = pathSegments[idx].ray.origin + intersection.t * pathSegments[idx].ray.direction;
+                scatterRay(pathSegments[idx], hitPoint, intersection.surfaceNormal, material, rng);
+            }
+        }
+    }
+}
+
+
 
 // Add the current iteration's output to the overall image
 __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
