@@ -298,7 +298,7 @@ __global__ void shadeRealMaterial(
         if (intersection.t > 0.0f) {
 
             // rng?
-            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idex, 0);
+            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, 0);
             thrust::uniform_real_distribution<float> u01(0, 1);
 
             Material material = materials[intersection.materialId];
