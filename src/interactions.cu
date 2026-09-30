@@ -59,19 +59,21 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
 
         float prob_spec = m.hasReflective;
 
+        glm::vec3 dir;
+
         if (prob_spec < u01(rng)) {
-            glm::vec3 dir = calculateRandomDirectionInHemisphere(normal, rng);
-            pathSegment.ray.origin = intersect + normal * 0.001f;
-            pathSegment.ray.direction = dir;
-            pathSegment.color *= m.color;
-            --pathSegment.remainingBounces;
+            dir = calculateRandomDirectionInHemisphere(normal, rng);
         }
         else {
             // refract
-            glm::vec3 dir = glm::reflect(pathSegment.ray.direction, normal);
-            pathSegment.ray.origin = intersect + normal * 0.001f;
-            pathSegment.ray.direction = dir;
-            pathSegment.color *= m.color;
-            --pathSegment.remainingBounces;
+            dir = glm::reflect(pathSegment.ray.direction, normal);
+
+        }
+        pathSegment.ray.origin = intersect + normal * 0.001f;
+        pathSegment.ray.direction = dir;
+        pathSegment.color *= m.color;
+        --pathSegment.remainingBounces;
+        if (pathSegment.remainingBounces <= 0) {
+            pathSegment.color = glm::vec3(0.f);
         }
     }

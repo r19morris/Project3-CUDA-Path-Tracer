@@ -293,12 +293,12 @@ __global__ void shadeRealMaterial(
     Material* materials
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_paths) {
+    if (idx < num_paths && pathSegments && pathSegments[idx].remainingBounces > 0) {
         ShadeableIntersection intersection = shadeableIntersections[idx];
         if (intersection.t > 0.0f) {
 
             // rng?
-            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, 0);
+            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, pathSegments[idx].remainingBounces);
             thrust::uniform_real_distribution<float> u01(0, 1);
 
             Material material = materials[intersection.materialId];
@@ -306,11 +306,17 @@ __global__ void shadeRealMaterial(
 
             if (material.emittance > 0.0f) {
                 pathSegments[idx].color *= (materialColor * material.emittance);
+                pathSegments[idx].remainingBounces = 0; // cut off further bounces after reach light source
             }
             else {
                 glm::vec3 hitPoint = pathSegments[idx].ray.origin + intersection.t * pathSegments[idx].ray.direction;
                 scatterRay(pathSegments[idx], hitPoint, intersection.surfaceNormal, material, rng);
             }
+        }
+        else {
+            // ray left box
+            pathSegments[idx].color = glm::vec3(0.f);
+            pathSegments[idx].remainingBounces = 0;
         }
     }
 }
@@ -418,14 +424,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // TODO: compare between directly shading the path segments and shading
         // path segments that have been reshuffled to be contiguous in memory.
 
-        shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
+        shadeRealMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
             iter,
             num_paths,
             dev_intersections,
             dev_paths,
             dev_materials
         );
-        iterationComplete = true; // TODO: should be based off stream compaction results.
+        iterationComplete = (depth >= traceDepth); // TODO: should be based off stream compaction results.
 
         if (guiData != NULL)
         {
