@@ -335,6 +335,18 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     }
 }
 
+// new gather, called on every iteration
+__global__ void newGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
+{
+    int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (idx < nPaths && iterationPaths[idx].remainingBounces <= 0)
+    {
+        PathSegment iterationPath = iterationPaths[idx];
+        image[iterationPath.pixelIndex] += iterationPath.color;
+    }
+}
+
 /**
  * Wrapper for the __global__ call that sets up the kernel calls and does a ton
  * of memory management
@@ -431,7 +443,12 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_paths,
             dev_materials
         );
-        iterationComplete = (depth >= traceDepth); // TODO: should be based off stream compaction results.
+
+        newGather << <numblocksPathSegmentTracing, blockSize1d >> > (num_paths, dev_image, dev_paths);
+        PathSegment* newEndPtr = thrust::remove_if(thrust::device, dev_paths, dev_paths + num_paths, IsDead());
+        num_paths = newEndPtr - dev_paths;
+
+        iterationComplete = (num_paths == 0 || depth >= traceDepth); // TODO: should be based off stream compaction results.
 
         if (guiData != NULL)
         {
@@ -442,6 +459,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // Assemble this iteration and apply it to the image
     dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
     finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
+
+
 
     ///////////////////////////////////////////////////////////////////////////
 
