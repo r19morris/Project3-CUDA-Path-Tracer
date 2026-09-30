@@ -6,6 +6,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/remove.h>
+#include <thrust/sort.h> // for sorting the different materials
 
 #include "sceneStructs.h"
 #include "scene.h"
@@ -16,6 +17,8 @@
 #include "interactions.h"
 
 #define ERRORCHECK 1
+
+#define SORT_BY_MATERIAL 1
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -147,7 +150,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
         // TODO: implement antialiasing by jittering the ray
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+        thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0); // shading doesnt use zero
         thrust::uniform_real_distribution<float> u01(0, 1);
 
 
@@ -155,6 +158,20 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             - cam.right * cam.pixelLength.x * (((float)x + u01(rng) - 0.5f) - (float)cam.resolution.x * 0.5f)
             - cam.up * cam.pixelLength.y * (((float)y + u01(rng) - 0.5f) - (float)cam.resolution.y * 0.5f)
         );
+
+        /* depth of field update */
+
+        glm::vec3 dir = segment.ray.direction;
+        if (cam.lensRadius > 0.f) {
+            float t = cam.focalDistance / glm::dot(dir, cam.view);
+            glm::vec3 focusPoint = cam.position + t * dir;
+            float r = cam.lensRadius * sqrtf(u01(rng));
+            float theta = 2.f * PI * u01(rng);
+            glm::vec3 lensOffset = cam.right * (r * cosf(theta)) + cam.up * (r * sinf(theta));
+
+            segment.ray.origin = cam.position + lensOffset;
+            segment.ray.direction = glm::normalize(focusPoint - segment.ray.origin);
+        }
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
@@ -340,10 +357,13 @@ __global__ void newGather(int nPaths, glm::vec3* image, PathSegment* iterationPa
 {
     int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
+
     if (idx < nPaths && iterationPaths[idx].remainingBounces <= 0)
     {
         PathSegment iterationPath = iterationPaths[idx];
-        image[iterationPath.pixelIndex] += iterationPath.color;
+        glm::vec3 c = iterationPath.color;
+        if (isnan(c.x) || isnan(c.y) || isnan(c.z)) c = glm::vec3(1, 0, 1);   // magenta = NaN
+        image[iterationPath.pixelIndex] += c;
     }
 }
 
@@ -436,6 +456,12 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // TODO: compare between directly shading the path segments and shading
         // path segments that have been reshuffled to be contiguous in memory.
 
+        #if SORT_BY_MATERIAL
+
+        thrust::sort_by_key(thrust::device, dev_intersections, dev_intersections + num_paths, dev_paths, MaterialCmp());
+
+        #endif
+
         shadeRealMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
             iter,
             num_paths,
@@ -457,8 +483,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     }
 
     // Assemble this iteration and apply it to the image
-    dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-    finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
+    //dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
+    //finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
 
 
 
@@ -473,3 +499,4 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     checkCUDAError("pathtrace");
 }
+

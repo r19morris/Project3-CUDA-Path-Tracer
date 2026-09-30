@@ -13,3 +13,9 @@ struct IsDead {
         return p.remainingBounces <= 0;
     }
 };
+// for thrust sorting comparison
+struct MaterialCmp {
+    __host__ __device__ bool operator()(const ShadeableIntersection& a, const ShadeableIntersection& b) const {
+        return a.materialId < b.materialId;
+    }
+};
