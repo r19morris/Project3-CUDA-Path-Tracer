@@ -1,4 +1,5 @@
 #include "intersections.h"
+#define MESH_BBOX_CULLING 1
 
 __host__ __device__ float boxIntersectionTest(
     Geom box,
@@ -110,6 +111,86 @@ __host__ __device__ float sphereIntersectionTest(
     //{
     //    normal = -normal;
     //}
+
+    return glm::length(r.origin - intersectionPoint);
+}
+
+__host__ __device__ float triangleIntersect(const Ray& rt, const Triangle& tr, float& u, float& v) {
+    // find distance to triangle
+    auto n = glm::cross(tr.v1 - tr.v0, tr.v2 - tr.v0);
+    auto d = glm::dot(tr.v0 - rt.origin, n);
+    auto rate = glm::dot(rt.direction, n); // rate approaching normal
+    if (fabsf(rate) < 1e-8f) return -1.f; // parallel, will never reach
+    auto t = d / rate; // time = distance / speed
+    if (t < 1e-4f) return -1.f; // plane behind ray never will reach, with some allowance for being close
+    auto p = rt.origin + t * rt.direction;
+
+    // convert to barycentric
+    auto e1 = tr.v1 - tr.v0;
+    auto e2 = tr.v2 - tr.v0;
+    auto vp = p - tr.v0;
+    float nn = glm::dot(n, n);
+
+    u = glm::dot(n, glm::cross(vp, e2)) / nn; // weight of v1
+    v = glm::dot(n, glm::cross(e1, vp)) / nn; // weight of v2
+
+    if (u < 0.f || v < 0.f || u + v > 1.f) return -1.f;
+    return t;
+}
+
+
+__host__ __device__ float meshIntersectionTest(
+    Geom mesh,
+    const Triangle* triangles,   // the global triangle array (dev_triangles)
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
+{
+    // mesh has object space
+    Ray rt;
+    rt.origin = multiplyMV(mesh.inverseTransform, glm::vec4(r.origin, 1.0f));
+    rt.direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(r.direction, 0.0f)));
+
+#if MESH_BBOX_CULLING
+    {
+        glm::vec3 inv = 1.f / rt.direction;
+        glm::vec3 t0 = (mesh.bboxMin - rt.origin) * inv;
+        glm::vec3 t1 = (mesh.bboxMax - rt.origin) * inv;
+        glm::vec3 tEnter = glm::min(t0, t1);
+        glm::vec3 tExit = glm::max(t0, t1);
+        float tNear = fmaxf(fmaxf(tEnter.x, tEnter.y), tEnter.z); // when have u entered all 3 dims
+        float tFar = fminf(fminf(tExit.x, tExit.y), tExit.z); // when have u exited all 3 dims
+        if (tFar < fmaxf(tNear, 0.f)) return -1.f; // missed box
+    }
+#endif
+    // loop over triangles
+    float tMin = FLT_MAX;
+    int hitIndex = -1;
+    float hitU = 0.f, hitV = 0.f;
+
+    for (int i = mesh.triStart; i < mesh.triStart + mesh.triCount; ++i) {
+        float u, v;
+        float t = triangleIntersect(rt, triangles[i], u, v);
+        if (t > 0.f && t < tMin) {
+            // closest triangle hit so far
+            tMin = t;
+            hitIndex = i;
+            hitU = u;
+            hitV = v;
+        }
+    }
+    // finished iterating all triangles
+    if (hitIndex < 0) return -1.f; // hitindex never updated, all triangles missed
+    const auto& tr = triangles[hitIndex];
+    auto point = rt.origin + tMin * rt.direction;
+    auto objNormal = (1.f - hitU - hitV) * tr.n0 + hitU * tr.n1 + hitV * tr.n2; // blending normals, object space
+
+    // convert to world space
+    intersectionPoint = multiplyMV(mesh.transform, glm::vec4(point, 1.f));
+    normal = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(objNormal, 0.f)));
+
+    outside = glm::dot(r.direction, normal) < 0.f;
 
     return glm::length(r.origin - intersectionPoint);
 }

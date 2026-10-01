@@ -6,14 +6,13 @@
 #include <glm/gtx/string_cast.hpp>
 #include "json.hpp"
 
+#include <cfloat>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <unordered_map>
 
 // for gltf
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
 #include "tiny_gltf_v3.h"
 
 using namespace std;
@@ -136,6 +135,11 @@ static void loadGLTF(const std::string& path, Geom& geom, std::vector<Triangle>&
     tg3_error_stack_free(&errors);
 }
 
+
+
+
+
+
 void Scene::loadFromJSON(const std::string& jsonName)
 {
     std::ifstream f(jsonName);
@@ -184,10 +188,14 @@ void Scene::loadFromJSON(const std::string& jsonName)
         {
             newGeom.type = CUBE;
         }
-        else
+        else if (type == "sphere")
         {
             newGeom.type = SPHERE;
         }
+        else if (type == "gltf") {
+            newGeom.type = MESH;
+        }
+
         newGeom.materialid = MatNameToID[p["MATERIAL"]];
         const auto& trans = p["TRANS"];
         const auto& rotat = p["ROTAT"];
@@ -199,6 +207,10 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newGeom.translation, newGeom.rotation, newGeom.scale);
         newGeom.inverseTransform = glm::inverse(newGeom.transform);
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
+
+        if (newGeom.type == MESH) {
+            loadGLTF(p["FILE"].get<std::string>(), newGeom, triangles);
+        }
 
         geoms.push_back(newGeom);
     }
