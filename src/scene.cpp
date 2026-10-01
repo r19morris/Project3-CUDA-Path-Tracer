@@ -11,6 +11,11 @@
 #include <string>
 #include <unordered_map>
 
+// for gltf
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#include "tiny_gltf_v3.h"
+
 using namespace std;
 using json = nlohmann::json;
 
@@ -29,6 +34,106 @@ Scene::Scene(string filename)
         cout << "Couldn't read from " << filename << endl;
         exit(-1);
     }
+}
+
+/* new */
+static const uint8_t* tg3AccessorPtr(const tg3_model& m, const tg3_accessor& acc, int& stride)
+{
+    const tg3_buffer_view& bv = m.buffer_views[acc.buffer_view];
+    stride = tg3_accessor_byte_stride(&acc, &bv);
+    return m.buffers[bv.buffer].data.data + bv.byte_offset + acc.byte_offset;
+}
+
+/* new */
+static uint32_t readIndex(const uint8_t* p, int componentType)
+{
+    switch (componentType) {
+    case TG3_COMPONENT_TYPE_UNSIGNED_BYTE:  return *p;
+    case TG3_COMPONENT_TYPE_UNSIGNED_SHORT: return *(const uint16_t*)p;
+    default:                                return *(const uint32_t*)p;
+    }
+}
+
+static void loadGLTF(const std::string& path, Geom& geom, std::vector<Triangle>& tris)
+{
+    tg3_model model;
+    tg3_error_stack errors;
+    tg3_parse_options opts;
+    tg3_error_stack_init(&errors);
+    tg3_parse_options_init(&opts);
+
+    if (tg3_parse_file(&model, &errors, path.c_str(), (uint32_t)path.size(), &opts) != TG3_OK) {
+        for (uint32_t i = 0; i < tg3_errors_count(&errors); i++)
+            std::cerr << "glTF: " << tg3_errors_get(&errors, i)->message << std::endl;
+        tg3_model_free(&model);
+        tg3_error_stack_free(&errors);
+        exit(-1);
+    }
+
+    geom.triStart = (int)tris.size();
+    geom.bboxMin = glm::vec3(FLT_MAX);
+    geom.bboxMax = glm::vec3(-FLT_MAX);
+
+    for (uint32_t mi = 0; mi < model.meshes_count; mi++) {
+        const tg3_mesh& mesh = model.meshes[mi];
+        for (uint32_t pi = 0; pi < mesh.primitives_count; pi++) {
+            const tg3_primitive& prim = mesh.primitives[pi];
+            if (prim.mode != TG3_MODE_TRIANGLES) continue;
+
+            // find POSITION / NORMAL accessor indices
+            int posIdx = -1, nrmIdx = -1;
+            for (uint32_t a = 0; a < prim.attributes_count; a++) {
+                if (tg3_str_equals_cstr(prim.attributes[a].key, "POSITION")) posIdx = prim.attributes[a].value;
+                else if (tg3_str_equals_cstr(prim.attributes[a].key, "NORMAL")) nrmIdx = prim.attributes[a].value;
+            }
+            if (posIdx < 0) continue;
+
+            const tg3_accessor& posAcc = model.accessors[posIdx];
+            int posStride;
+            const uint8_t* posData = tg3AccessorPtr(model, posAcc, posStride);
+
+            const uint8_t* nrmData = nullptr;
+            int nrmStride = 0;
+            if (nrmIdx >= 0) nrmData = tg3AccessorPtr(model, model.accessors[nrmIdx], nrmStride);
+
+            auto pos = [&](uint32_t i) { return *(const glm::vec3*)(posData + i * posStride); };
+            auto nrm = [&](uint32_t i) { return *(const glm::vec3*)(nrmData + i * nrmStride); };
+
+            std::vector<uint32_t> idx;
+            if (prim.indices >= 0) {
+                const tg3_accessor& iAcc = model.accessors[prim.indices];
+                int iStride;
+                const uint8_t* iData = tg3AccessorPtr(model, iAcc, iStride);
+                for (uint64_t k = 0; k < iAcc.count; k++)
+                    idx.push_back(readIndex(iData + k * iStride, iAcc.component_type));
+            }
+            else {
+                for (uint32_t k = 0; k < (uint32_t)posAcc.count; k++) idx.push_back(k);
+            }
+
+            for (size_t k = 0; k + 2 < idx.size(); k += 3) {
+                Triangle t;
+                t.v0 = pos(idx[k]); t.v1 = pos(idx[k + 1]); t.v2 = pos(idx[k + 2]);
+                if (nrmData) {
+                    t.n0 = nrm(idx[k]); t.n1 = nrm(idx[k + 1]); t.n2 = nrm(idx[k + 2]);
+                }
+                else {
+                    glm::vec3 fn = glm::normalize(glm::cross(t.v1 - t.v0, t.v2 - t.v0));
+                    t.n0 = t.n1 = t.n2 = fn;
+                }
+                for (const glm::vec3& v : { t.v0, t.v1, t.v2 }) {
+                    geom.bboxMin = glm::min(geom.bboxMin, v);
+                    geom.bboxMax = glm::max(geom.bboxMax, v);
+                }
+                tris.push_back(t);
+            }
+        }
+    }
+    geom.triCount = (int)tris.size() - geom.triStart;
+    std::cout << "Loaded " << geom.triCount << " triangles from " << path << std::endl;
+
+    tg3_model_free(&model);
+    tg3_error_stack_free(&errors);
 }
 
 void Scene::loadFromJSON(const std::string& jsonName)
