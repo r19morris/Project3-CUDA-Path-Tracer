@@ -178,7 +178,7 @@ int Scene::buildBVH(int start, int count) {
     if (lcount == 0 || lcount == count) {
         lcount = count / 2;
         std::nth_element(first, first + lcount, last, [&](const Triangle& a, const Triangle& b) {
-            return (a.v0[axis] + a.v1[axis] + a.v2[axis) < (b.v0[axis] + b.v1[axis] + b.v2[axis]);
+            return (a.v0[axis] + a.v1[axis] + a.v2[axis]) < (b.v0[axis] + b.v1[axis] + b.v2[axis]);
             });
     }
 

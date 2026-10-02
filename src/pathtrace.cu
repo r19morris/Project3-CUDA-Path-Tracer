@@ -118,7 +118,7 @@ void pathtraceInit(Scene* scene)
     cudaMemcpy(dev_triangles, scene->triangles.data(), scene->triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
 
     cudaMalloc(&dev_nodes, scene->nodes.size() * sizeof(BVHNode));
-    cudaMemcpy(&dev_nodes, scene->nodes.data(), scene->nodes.size() * sizeof(BVHNode), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_nodes, scene->nodes.data(), scene->nodes.size() * sizeof(BVHNode), cudaMemcpyHostToDevice);
 
 
     // TODO: initialize any extra device memeory you need
@@ -200,7 +200,8 @@ __global__ void computeIntersections(
     Geom* geoms,
     int geoms_size,
     ShadeableIntersection* intersections,
-    Triangle* triangles)
+    Triangle* triangles,
+    BVHNode* nodes)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -234,7 +235,7 @@ __global__ void computeIntersections(
             }
             else if (geom.type == MESH)
             {
-                t = meshIntersectionTest(geom, triangles, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+                t = meshIntersectionTest(geom, triangles, pathSegment.ray, tmp_intersect, tmp_normal, outside, nodes);
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -458,7 +459,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_geoms,
             hst_scene->geoms.size(),
             dev_intersections,
-            dev_triangles
+            dev_triangles,
+            dev_nodes
         );
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();

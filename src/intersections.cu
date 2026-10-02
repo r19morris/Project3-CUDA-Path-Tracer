@@ -1,5 +1,6 @@
 #include "intersections.h"
 #define MESH_BBOX_CULLING 1
+#define MESH_BVH 1
 
 __host__ __device__ float boxIntersectionTest(
     Geom box,
@@ -138,6 +139,17 @@ __host__ __device__ float triangleIntersect(const Ray& rt, const Triangle& tr, f
     return t;
 }
 
+/* code reorg putting the test in here */
+__host__ __device__ float enterBox(const Ray& r, glm::vec3 invDir, glm::vec3 bmin, glm::vec3 bmax) {
+    glm::vec3 t0 = (bmin - r.origin) * invDir;
+    glm::vec3 t1 = (bmax - r.origin) * invDir;
+    glm::vec3 tEnter = glm::min(t0, t1);
+    glm::vec3 tExit = glm::max(t0, t1);
+    float tNear = fmaxf(fmaxf(tEnter.x, tEnter.y), tEnter.z); // when have u entered all 3 dims
+    float tFar = fminf(fminf(tExit.x, tExit.y), tExit.z); // when have u exited all 3 dims
+    if (tFar < fmaxf(tNear, 0.f)) return -1.f; // missed box
+    return fmaxf(tNear, 0.f);
+}
 
 __host__ __device__ float meshIntersectionTest(
     Geom mesh,
@@ -145,7 +157,9 @@ __host__ __device__ float meshIntersectionTest(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
-    bool& outside)
+    bool& outside,
+    const BVHNode* nodes // the bvhnode array
+)
 {
     // mesh has object space
     Ray rt;
@@ -154,21 +168,41 @@ __host__ __device__ float meshIntersectionTest(
 
 #if MESH_BBOX_CULLING
     {
-        glm::vec3 inv = 1.f / rt.direction;
-        glm::vec3 t0 = (mesh.bboxMin - rt.origin) * inv;
-        glm::vec3 t1 = (mesh.bboxMax - rt.origin) * inv;
-        glm::vec3 tEnter = glm::min(t0, t1);
-        glm::vec3 tExit = glm::max(t0, t1);
-        float tNear = fmaxf(fmaxf(tEnter.x, tEnter.y), tEnter.z); // when have u entered all 3 dims
-        float tFar = fminf(fminf(tExit.x, tExit.y), tExit.z); // when have u exited all 3 dims
-        if (tFar < fmaxf(tNear, 0.f)) return -1.f; // missed box
+        if (enterBox(rt, 1.f / rt.direction, mesh.bboxMin, mesh.bboxMax) < 0.f) return -1.f;
     }
 #endif
-    // loop over triangles
+    // defaults if we dont use the BVH
     float tMin = FLT_MAX;
     int hitIndex = -1;
     float hitU = 0.f, hitV = 0.f;
+#if MESH_BVH
+    // traverse bvh
+    auto invDir = 1.f / rt.direction;
+    int stack[64];
+    int sp = 0;
+    stack[sp++] = mesh.root; // push the root
 
+
+    while (sp > 0) {
+        const BVHNode& node = nodes[stack[--sp]]; // pop
+        float tBox = enterBox(rt, invDir, node.bottom_corner, node.top_corner);
+        if (tBox < 0.f || tBox > tMin) continue; // missed this node no need to explore
+        if (node.left_child == -1) {
+            // leaf test true
+            for (int i = node.t_start_idx; i < node.t_start_idx + node.t_count; ++i) {
+                float u, v;
+                float t = triangleIntersect(rt, triangles[i], u, v);
+                if (t > 0.f && t < tMin) { tMin = t; hitIndex = i; hitU = u; hitV = v; }
+            }
+        }
+        else {
+            // push to stack, not leaf has 2 children
+            stack[sp++] = node.right_child;
+            stack[sp++] = node.left_child;
+        }
+    }
+#else
+    // loop over ALL triangles
     for (int i = mesh.triStart; i < mesh.triStart + mesh.triCount; ++i) {
         float u, v;
         float t = triangleIntersect(rt, triangles[i], u, v);
@@ -180,6 +214,8 @@ __host__ __device__ float meshIntersectionTest(
             hitV = v;
         }
     }
+#endif
+
     // finished iterating all triangles
     if (hitIndex < 0) return -1.f; // hitindex never updated, all triangles missed
     const auto& tr = triangles[hitIndex];
