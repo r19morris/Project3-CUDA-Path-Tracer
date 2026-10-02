@@ -6,6 +6,7 @@
 #include <glm/gtx/string_cast.hpp>
 #include "json.hpp"
 
+#include <algorithm> // std::partition
 #include <cfloat>
 #include <fstream>
 #include <iostream>
@@ -135,7 +136,61 @@ static void loadGLTF(const std::string& path, Geom& geom, std::vector<Triangle>&
     tg3_error_stack_free(&errors);
 }
 
+/* can access tris from class directly
+return index where placed */
+int Scene::buildBVH(int start, int count) {
+    // calc min and max bounding from start and count
+    BVHNode new_node{};
+    glm::vec3 cMin(FLT_MAX);
+    glm::vec3 cMax(-FLT_MAX);
+    for (int i = start; i < start + count; ++i) {
+        // get triangle, calculate box
+        const auto& t = triangles[i];
+        new_node.bottom_corner = glm::min(new_node.bottom_corner, glm::min(t.v0, glm::min(t.v1, t.v2)));
+        new_node.top_corner = glm::max(new_node.top_corner, glm::max(t.v0, glm::max(t.v1, t.v2)));
+        auto c = (t.v0 + t.v1 + t.v2) / 3.f;
+        cMin = glm::min(cMin, c);
+        cMax = glm::max(cMax, c);
+    }
+    // quick return for leaf condition
+    if (count <= 4) {
+        new_node.t_start_idx = start;
+        new_node.t_count = count; // not 0
+        nodes.push_back(new_node);
+        return (int) nodes.size() - 1; // index where node located
+    }
+    // calculate split based on most divergent axis to get two resultant boxes
+    auto diff = cMax - cMin;
+    int axis = 0; // x = 0, y = 1, z = 2
+    if (diff.y > diff.x) axis = 1; // compares x and y
+    if (diff.z > diff[axis]) axis = 2; // compares winner above and z
+    auto split = 0.5f * (cMin[axis] + cMax[axis]);
 
+    // sort the triangles 
+    auto first = triangles.begin() + start;
+    auto last = first + count;
+    auto mid = std::partition(first, last, [&](const Triangle& t) {
+        auto c = (t.v0 + t.v1 + t.v2) / 3.f;
+        return c[axis] < split; // true gets put to the left
+        });
+    int lcount = (int) (mid - first);
+    // fix everything on one side
+    if (lcount == 0 || lcount == count) {
+        lcount = count / 2;
+        std::nth_element(first, first + lcount, last, [&](const Triangle& a, const Triangle& b) {
+            return (a.v0[axis] + a.v1[axis] + a.v2[axis) < (b.v0[axis] + b.v1[axis] + b.v2[axis]);
+            });
+    }
+
+    int par_idx = (int)nodes.size();
+    nodes.push_back(new_node);
+    int left_ch = buildBVH(start, lcount); // left will always be reserved dir after parent.
+    int right_ch = buildBVH(start + lcount, count - lcount);
+    // go back to recently pushed node to add children in it
+    nodes[par_idx].left_child = left_ch;
+    nodes[par_idx].right_child = right_ch;
+    return par_idx;
+}
 
 
 
@@ -210,6 +265,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
 
         if (newGeom.type == MESH) {
             loadGLTF(p["FILE"].get<std::string>(), newGeom, triangles);
+            newGeom.root = buildBVH(newGeom.triStart, newGeom.triCount); // resurcisve cpu bvh creation
         }
 
         geoms.push_back(newGeom);

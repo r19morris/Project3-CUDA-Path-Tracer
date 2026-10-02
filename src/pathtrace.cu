@@ -84,6 +84,7 @@ static Material* dev_materials = NULL;
 static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
 static Triangle* dev_triangles = NULL;
+static BVHNode* dev_nodes = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 
@@ -116,6 +117,10 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_triangles, scene->triangles.size() * sizeof(Triangle));
     cudaMemcpy(dev_triangles, scene->triangles.data(), scene->triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
 
+    cudaMalloc(&dev_nodes, scene->nodes.size() * sizeof(BVHNode));
+    cudaMemcpy(&dev_nodes, scene->nodes.data(), scene->nodes.size() * sizeof(BVHNode), cudaMemcpyHostToDevice);
+
+
     // TODO: initialize any extra device memeory you need
 
     checkCUDAError("pathtraceInit");
@@ -129,6 +134,7 @@ void pathtraceFree()
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
     cudaFree(dev_triangles);
+    cudaFree(dev_nodes);
     // TODO: clean up any extra device memory you created
 
     checkCUDAError("pathtraceFree");

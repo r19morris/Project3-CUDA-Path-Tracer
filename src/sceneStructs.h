@@ -41,6 +41,7 @@ struct Geom
     int triCount = 0;
     glm::vec3 bboxMin;
     glm::vec3 bboxMax;
+    int root;
 };
 
 struct Material
@@ -96,4 +97,13 @@ struct ShadeableIntersection
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+};
+
+struct BVHNode {
+    int t_start_idx = 0; // if leaf, first triangle
+    int t_count= 0; // if leaf, num triangles
+    glm::vec3 bottom_corner = glm::vec3(FLT_MAX); // bounding box mins
+    glm::vec3 top_corner = glm::vec3(-FLT_MAX); // bounding box maxes
+    int left_child = -1; // left child index
+    int right_child = -1; // right child index
 };
