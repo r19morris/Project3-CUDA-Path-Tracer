@@ -72,13 +72,13 @@ __host__ __device__ void scatterRay(
     const Material &m,
     thrust::default_random_engine &rng)
 {
-    // TODO: implement this.
-    // A basic implementation of pure-diffuse shading will just call the
-    // calculateRandomDirectionInHemisphere defined above.
+
 
     thrust::uniform_real_distribution<float> u01(0, 1); // rng
-
-    float prob_spec = m.hasReflective;
+    auto diff_col = (m.color.r + m.color.g + m.color.b) / 3.f;
+    auto spec_col = (m.specular.color.r + m.specular.color.g + m.specular.color.b) / 3.f;
+    auto prob_spec = (m.hasReflective > 0.f && diff_col + spec_col > 0.f) ? spec_col / (diff_col + spec_col) : 0.f;
+    // calculate prob_spec based on the colors
     float refract = m.hasRefractive;
     glm::vec3 wi = pathSegment.ray.direction; // initial direction
 
@@ -103,15 +103,16 @@ __host__ __device__ void scatterRay(
     }
     else {
         // fall back to typical diffuse / reflect mix
-        if (prob_spec < u01(rng)) {
+        if (prob_spec <= u01(rng)) {
             dir = calculateRandomDirectionInHemisphere(normal, rng);
+            pathSegment.color *= m.color / (1.f - prob_spec);
         }
         else {
-            // refract
+            // reflect
             dir = glm::reflect(pathSegment.ray.direction, normal);
-
+            pathSegment.color *= m.specular.color / prob_spec;
         }
-        pathSegment.color *= m.color;
+        //pathSegment.color *= m.color;
     }
     pathSegment.ray.origin = intersect + dir * 0.001f;
     pathSegment.ray.direction = dir;

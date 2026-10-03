@@ -31,6 +31,12 @@
       "TYPE": "Diffuse",
       "RGB": [ 0.98, 0.8, 0.1 ]
 
+    },
+    "diffuse_mix": {
+      "TYPE": "Specular",
+      "RGB": [ 0.3, 0.3, 0.3 ],
+      "DIFFUSE_RGB": [ 0.65, 0.1, 0.1 ]
+
     }
   },
     "Camera":
@@ -92,7 +98,7 @@
         },
         {
           "TYPE": "sphere",
-          "MATERIAL": "diffuse_white",
+          "MATERIAL": "diffuse_mix",
           "TRANS": [ -1.0, 4.0, -1.0 ],
           "ROTAT": [ 0.0, 0.0, 0.0 ],
           "SCALE": [ 3.0, 3.0, 3.0 ]
