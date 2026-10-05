@@ -56,10 +56,12 @@ CUDA Path Tracer
 
 - **Stochastic sampled antialiasing**: In `generateRayFromCamera` the initial camera rays intersection points are jittered between -0.5 and 0.5 pixels which ensures that pixels landing on the boundaries are blurred between the two materials, creating an antialiasing affect. Below are pictures rendered from the cover scene `scenes/pedestals.json` before and after the anti-aliasing code modification. Most noticable is the difference in the cube geometries, as the lines jag over at a certain point. Additionally, on the more complex glTF renders like the Stanford dragon, you can see the edges look way more jagged
 
-<p align="center">
-<img src="img/antialiasing_off.png" width="500" hspace="20">
-<img src="img/antialiasing_on.png" width="500">
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><img src="img/antialiasing_off.png" width="420"><br><em>Antialiasing off</em></td>
+    <td align="center"><img src="img/antialiasing_on.png" width="420"><br><em>Antialiasing on</em></td>
+  </tr>
+</table>
 <p align="center">
 <img src="img/aa_pedestal.png" width="500" hspace="20">
 </p>
@@ -90,11 +92,32 @@ CUDA Path Tracer
 
 
 ### Depth of Field (TODO)
-- Explanation
-- Added focal distance and lens size to the Camera object
-- To do (before and after pic, can reference the initial headline pictures)
-- **GPU vs CPU**: This 
-- Any changes to performance having this "on" or "off"
+- In order to simulate a camera with a lens and the focal distance being sharp with the rest blurry, I modified the scene `.json` file template to contain a focal distance and lens size field in the Camera object. Lens size of 0 functions the same as it currently functions, with everything being equally sharp. `generateRayFromCamera` was edited, using [PBR 5.2.3](https://pbr-book.org/4ed/Cameras_and_Film/Projective_Camera_Models#TheThinLensModelandDepthofField) as a reference. The camera ray's initial origin and direction is set via a random `theta` and `r` within the lens disk. The rays direction is set based on the direction between this random point and the focal point, which is calculated as the pinhole ray from the center of the camera to the focal plane, which is the plane `focalDistance` in front of the camera.
+- **Performance**: There was a measurable drop in having this feature on vs. having it off (lens radius of 0). FPS dropped about 1 frame. This is due to the extra computation on the GPU at the start of each iteration that can be avoided if we just shoot the ray directly (calculating the focal distance to the plane, etc.). This cost should NOT scale with the lens radius, so it makes sense that the performance with lens radius increasing does not drop off as much as the initial drop in performance from adding the feature. However, increasing the lens radius to the approximate size of the scene (10.0) results in another noticable drop in performance. A potential hypothesis for this is that because the rays at any given camera pixel can be shot from nearly anywhere in the scene, warp divergence is increased because there will be rays on the same warp hitting many different objects. Because of this, I ran a final test with sorting by object type `SORT_BY_MATERIAL` back on with lens radius 10.0. The frame rate was still significantly lower at 25.1 FPS.
+- **CPU vs GPU cost difference**: Increasing the lens radius does not have any impact on CPU implementation, as rays are traced one at a time. As described above, it may introduce some warp difference in the GPU implementation which could require other mitigations. For an implementation on either CPU or GPU, the cost of this change is quite little as it only impacts the initial rays at the beginning of each iteration and adds only a few instructions which are less computationally expensive than the shader and intersection finder. 
+
+| Lens radius | FPS (more better)  |
+|------------:|-----:|
+| 0.0         | 41.4 |
+| 0.4         | 40.5 |
+| 1.2         | 40.5 |
+| 2.0         | 40.1 |
+| 10.0        | 38.4 |
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="img/no_blur.png" width="350"><br><em>Lens radius 0.0</em></td>
+    <td align="center"><img src="img/final_blur.png" width="350"><br><em>Lens radius 0.4</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="img/1.2_blur.png" width="350"><br><em>Lens radius 1.2</em></td>
+    <td align="center"><img src="img/2.0_blur.png" width="350"><br><em>Lens radius 2.0</em></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="img/10.0_blur.png" width="350"><br><em>Lens radius 10.0</em></td>
+  </tr>
+</table>
+
 
 
 ### glTF Mesh and BVH Data Structure (TODO)
