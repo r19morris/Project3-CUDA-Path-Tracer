@@ -8,7 +8,8 @@ CUDA Path Tracer
 * Tested on: Windows 11, Intel i7-12700H @ 2.3GHz 64GB, GeForce RTX 3070 Ti Laptop GPU 8GB
 
 <p align="center">
-<img src="img/final.png" width="500" hspace="20">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="img/final_blur.png" width="500">
+<img src="img/final.png" width="500" hspace="20">
+<img src="img/final_blur.png" width="500">
 </p>
 
 
@@ -22,7 +23,9 @@ CUDA Path Tracer
 	- For refractive material, see in-depth discussion in a later section
 
 - **Optimization: Sorting paths by material** (`SORT_BY_MATERIAL`): When this optimization flag is set to 1 in the preprocessor instruction, before shading, `thrust::sort_by_key` sorts the intersections and path segments device arrays by `materialId`. This way, threads in the same warp shade the same material where possible.
-	- *Analysis:* Test ran on initial settings, 800x800px `scenes/cornell.json`
+	- *Analysis:* Test ran on initial settings, 800x800px `scenes/cornell.json` and `scenes/pedestals.json` (the cover image). The former has no gltf mesh renderings, and the latter contains a couple of meshes in addition to basic cube and sphere shapes. The results indicate that this optimization leads to worse performance for these scenes, as the benefit of separating the relatively inexpensive materials (sphere and cube) with cheap evaluations from the meshes introduces more sorting overhead than efficient use of warps. One thing that is clear though is that the performance penalty is less for the pedestal scene, meaning that the inclusion of the triangle geometry mesh is starting to point to the usefulness of the sorting in implementation effeciency
+
+	<img src="img/sort_toggle.png" width ="500">
 
 - **Optimization: Stream compaction** Instead of having one single kernel gather all colors to write-back to the image at the end, terminated paths (e.g., hits light source, leaves scene) after each bounce, terminated paths (misses, light hits, or no bounces left) are added to the image and removed with `thrust::remove_if`, reducing the number of warps that need to be launched for later iterations, as not all of the initial rays will make it to the end
 	- *Analysis*: On the first iteration, here are the number of remaining paths at each bounce (note sorting is off). This was ran on `scenes/cornell.json` . The number of paths quickly decreases on the first few bounces in the initial open cornell box. A modification of the open Cornell box, called `scenes/cornell_closed.json` adds a front wall to the box and places the camera inside the box. Now, because the termination condition is much narrower, most of the rays stay active as they will only stop if they hit the much smaller light rectangle on the box's ceiling
@@ -51,28 +54,50 @@ CUDA Path Tracer
 
 
 
-- **Stochastic sampled antialiasing**: In `generateRayFromCamera` the initial camera rays intersection points are jittered between -0.5 and 0.5 pixels which ensures that pixels landing on the boundaries are blurred between the two materials, creating an antialiasing affect
-	- [TODO] show example of with and without if possible
+- **Stochastic sampled antialiasing**: In `generateRayFromCamera` the initial camera rays intersection points are jittered between -0.5 and 0.5 pixels which ensures that pixels landing on the boundaries are blurred between the two materials, creating an antialiasing affect. Below are pictures rendered from the cover scene `scenes/pedestals.json` before and after the anti-aliasing code modification. Most noticable is the difference in the cube geometries, as the lines jag over at a certain point. Additionally, on the more complex glTF renders like the Stanford dragon, you can see the edges look way more jagged
+
+<p align="center">
+<img src="img/antialiasing_off.png" width="500" hspace="20">
+<img src="img/antialiasing_on.png" width="500">
+</p>
+<p align="center">
+<img src="img/aa_pedestal.png" width="500" hspace="20">
+</p>
+<p align="center">
+
+<img src="img/aa_dragon.png" width="500">
+</p>
 
 
 
 ### Refraction
 
-- To handle the rendering of refractive surfaces like glass or water, I extended the `scatterRay` helper for the `shadeRealMaterial` kernel. Refraction (2pts). For this feature, sampling must randomly choose between reflection and transmission. Sample proportional to Fresnel reflectance R and complementary transmittance 1-R. 
+- To handle the rendering of refractive surfaces like glass or water, I extended the `scatterRay` helper for the `shadeRealMaterial` kernel. For this feature, sampling must randomly choose between reflection and transmission. [PBR 9.5](https://pbr-book.org/4ed/Reflection_Models/Dielectric_BSDF) illustrates the Dielectric BDSF, which is a combination of the BRDF for specular reflection and BTDF for specular transmission according to the Fresnel formula for dielectrics. The Fresnel formula was referenced in [PBR 9.3.5](https://pbr-book.org/4ed/Reflection_Models/Specular_Reflection_and_Transmission#TheFresnelEquations). This equation is implemented in `FrDielectric` helper in `interactions.cu`. It takes the angle of the intersection to the surface normal `cosThetaI` and `eta` which is equivalent to the `IOR`, assuming the `IOR` of the outside "air" is 1.0. The result of this equation gives the percentage of rays which are reflected using `glm::reflect` across the surface normal. The rays allowed to pass through are handled using `glm::refract (wi, n, eta)` which implements Snell's law, where `wi` is the incoming ray, `n` is the surface normal, and `eta` is IOR_from / IOR_to, meaning it is 1/IOR of the object that we pass into the scene. 
+- Sample proportional to Fresnel reflectance R and complementary transmittance 1-R
 	- Additional kernel: `FrDielectric` which implements Fresnel equation and Dialectric BSDF from PBR 9.5
+- GPU vs CPU: While this was straightforward to add to our `scatterRay` helper of the shading kernel to be implemented in parallel on the GPU, if we were to attempt a CPU-based implementation, we would have to iterate each pixels ray consecutively. However, compared to the base implementation, the branched code for either reflecting or transmitting is friendlier on a CPU because the CPU is able to execute one branch of the code only. In our case, we are now forcing the GPU to complete the Fresnel equation calculation on all pixels, even those without a refractive surface intersection. You can see this in the performance chart below, where enabling the feature in code changed performance. 
+- Performance: There was a -2.3% reduction in framerate when switching the simple ball in `scenes\cornell_one.json` from Diffuse to Refractive. As mentioned above, this is likely due to warp divergence and the expense of calculating the Fresnel equation.
 
-2. Depth of Field (2 pts - PBRTv4 5.2.3):
+| Sphere material | FPS  | Change |
+|-----------------|-----:|-------:|
+| Diffuse         | 52.2 |      - |
+| Refractive      | 51.0 |  -2.3% |
+
+<p align="center">
+<img src="img/diffuse.png" width="350" hspace="20">
+<img src="img/refractive.png" width="350">
+</p>
 
 
-### Depth of Field
+### Depth of Field (TODO)
 - Explanation
 - Added focal distance and lens size to the Camera object
 - To do (before and after pic, can reference the initial headline pictures)
-- GPU vs CPU discussion
+- **GPU vs CPU**: This 
 - Any changes to performance having this "on" or "off"
 
 
-### glTF Mesh and BVH Data Structure
+### glTF Mesh and BVH Data Structure (TODO)
 - Before or after could show performance with a reg box and a glTF box (and show image side by side). Use the other duck / dragon images to showcase after as well.
 - This project uses tiny_gltf_v3 to parse GLTF format and convert to Triangles objects set up on the CPU. 
 - Triangle intersection tests were added
@@ -84,17 +109,16 @@ CUDA Path Tracer
 
 
 
-## Analysis of Performance
-
-
-
-
-
-
-
-
 ## References
-- tiny gltf (figure out how to cite it correctly).
-- the gltf samples from the website (duck)
-- Stanford dragon
-- Utah teapot
+- [tinygltf](https://github.com/syoyo/tinygltf) (v3 C API: `tiny_gltf_v3.h`,
+  `tiny_gltf_v3.c`, `tinygltf_json_c.h`) for parsing glTF/GLB files.
+  Copyright (c) 2017 Syoyo Fujita, Aurélien Chatelain and others
+- [Duck](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Duck)
+  glTF sample model from the Khronos glTF-Sample-Assets repository.© 2006, Sony.
+- [Stanford Dragon](https://graphics.stanford.edu/data/3Dscanrep/)
+  model from the Stanford 3D Scanning Repository.
+  © Stanford University Computer Graphics Laboratory. Non-commercial research use.
+- [Utah Teapot](https://en.wikipedia.org/wiki/Utah_teapot)
+  model created by Martin Newell at the University of Utah.
+  © 1975, Martin Newell / University of Utah.
+
