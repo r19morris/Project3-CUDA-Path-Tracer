@@ -81,7 +81,7 @@
         "EYE":[0.0,1.0,11.0],
         "LOOKAT":[0.0,2.5,0.0],
         "UP": [ 0.0, 1.0, 0.0 ],
-        "LENS_RADIUS": 10.0,
+        "LENS_RADIUS": 0.0,
         "FOCAL_DISTANCE":  12.4
     },
   "Objects": [

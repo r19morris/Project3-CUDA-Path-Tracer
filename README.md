@@ -96,13 +96,24 @@ CUDA Path Tracer
 - **Performance**: There was a measurable drop in having this feature on vs. having it off (lens radius of 0). FPS dropped about 1 frame. This is due to the extra computation on the GPU at the start of each iteration that can be avoided if we just shoot the ray directly (calculating the focal distance to the plane, etc.). This cost should NOT scale with the lens radius, so it makes sense that the performance with lens radius increasing does not drop off as much as the initial drop in performance from adding the feature. However, increasing the lens radius to the approximate size of the scene (10.0) results in another noticable drop in performance. A potential hypothesis for this is that because the rays at any given camera pixel can be shot from nearly anywhere in the scene, warp divergence is increased because there will be rays on the same warp hitting many different objects. Because of this, I ran a final test with sorting by object type `SORT_BY_MATERIAL` back on with lens radius 10.0. The frame rate was still significantly lower at 25.1 FPS.
 - **CPU vs GPU cost difference**: Increasing the lens radius does not have any impact on CPU implementation, as rays are traced one at a time. As described above, it may introduce some warp difference in the GPU implementation which could require other mitigations. For an implementation on either CPU or GPU, the cost of this change is quite little as it only impacts the initial rays at the beginning of each iteration and adds only a few instructions which are less computationally expensive than the shader and intersection finder. 
 
-| Lens radius | FPS (more better)  |
-|------------:|-----:|
+<table>
+<tr>
+<td>
+
+| Lens radius | FPS (more better) |
+|------------:|------------------:|
 | 0.0         | 41.4 |
 | 0.4         | 40.5 |
 | 1.2         | 40.5 |
 | 2.0         | 40.1 |
 | 10.0        | 38.4 |
+
+</td>
+<td>
+<img src="img/dof_chart.png" width="500">
+</td>
+</tr>
+</table>
 
 <table align="center">
   <tr>
@@ -120,17 +131,31 @@ CUDA Path Tracer
 
 
 
-### glTF Mesh and BVH Data Structure (TODO)
-- Before or after could show performance with a reg box and a glTF box (and show image side by side). Use the other duck / dragon images to showcase after as well.
-- This project uses tiny_gltf_v3 to parse GLTF format and convert to Triangles objects set up on the CPU. 
-- Triangle intersection tests were added
-- Simple bounding box was used so that not every triangle has to be tested if the ray misses, toggled with `BLAH`
-- More advanced BVH data structure created as an area of `BVHNode`s on the device (add further discussion of this)
+### glTF Mesh
+- In the next phase of this project, I extended `loadFromJSON` in `scene.cpp` to support loading glTF meshes. This only loads the geometry, the material is still set with the color and material type as specified in the JSON file. The third-party `tiny_gltf_v3.c` library is included in this repo to support the parsing of gltf mesh. On my code's side, I call `loadGLTF` and pass in reference to the `triangles` array which is built on the CPU and later memcpy'd to the GPU. The function appends triangles to this array, starting at index `triangles.size()` and adding additional triangles, keeping the starting index of the first triangle in the mesh and the triangle count as objects built into that geometry's metadata on the CPU side. Only in `pathtraceInit` does the memory get `cudaMalloc`'d and `cudaMemcpy`'d into the `dev_triangles` device array.
+- Now that the geometry is represented on the device as an array of triangles, I implemented a new test in `intersections.cu`, `meshIntersectionTest()` and its helpers `triangleIntersect` and `enterBox`. `triangleIntersect` is an implementation of `glm::intersectRayTriangle` which takes the ray origin and the triangle's three vertices and returns a bool of whether the ray hits this particular triangle, along with setting barycentric coordinates and the ray length `t` as input reference parameters. 
+- As an initial performance improvement, a bounding box test was added and stored in each geoemtry, if the ray doesn't fall within the bounding box, -1 is returned without having to iterate through all triangles. This is toggled with the preprocessor directive `MESH_BBOX_CULLING`. Discussion of its performance will be included in the next section, along with the BVH. 
+
+
+### BVH Data Structure
+
+- As adding the `glTF` support slowed down the path tracer significantly, I decided to add a bounding volume hierarchy (BVH) data structure which is loaded first on the CPU and then copied to device memory alongside the `dev_triangles` array discussed before. The BVH is a binary tree, where each node stores contiguous triangles belonging to it, its bounding box with two glm::vec3s, and then the index in the node array of the two children nodes.
+
+```cpp
+struct BVHNode {
+    int t_start_idx = 0; // if leaf, first triangle
+    int t_count= 0; // if leaf, num triangles
+    glm::vec3 bottom_corner = glm::vec3(FLT_MAX); // bounding box mins
+    glm::vec3 top_corner = glm::vec3(-FLT_MAX); // bounding box maxes
+    int left_child = -1; // left child index
+    int right_child = -1; // right child index
+};
+```
+
+
 	- Show analysis charts of the performance of both
 	- [todo show a chart from timings from nsight for total execution time and improvements in specific kernels]
 - CPU vs GPU discussion, also with creating the data structure etc.
-
-
 
 ## References
 - [tinygltf](https://github.com/syoyo/tinygltf) (v3 C API: `tiny_gltf_v3.h`,
