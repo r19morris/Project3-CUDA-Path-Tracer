@@ -214,4 +214,7 @@ And as a funny comment, this is the result upon launching without BVH turned on:
 - [Utah Teapot](https://en.wikipedia.org/wiki/Utah_teapot)
   model created by Martin Newell at the University of Utah.
   © 1975, Martin Newell / University of Utah.
+- [Cloud Low Poly - Large](https://sketchfab.com/3d-models/cloud-low-poly-large-19f7ecd70a4f4c5f9b1a589d2cc308c1)
+  model by [PolyDavid](https://sketchfab.com/PolyDavid), from Sketchfab.
+  Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
