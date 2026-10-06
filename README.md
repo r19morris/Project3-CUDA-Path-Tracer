@@ -128,7 +128,6 @@ CUDA Path Tracer
 </table>
 
 
-
 ### glTF Mesh
 - In the next phase of this project, I extended `loadFromJSON` in `scene.cpp` to support loading glTF meshes. This only loads the geometry, the material is still set with the color and material type as specified in the JSON file. The third-party `tiny_gltf_v3.c` library is included in this repo to support the parsing of gltf mesh. On my code's side, I call `loadGLTF` and pass in reference to the `triangles` array which is built on the CPU and later memcpy'd to the GPU. The function appends triangles to this array, starting at index `triangles.size()` and adding additional triangles, keeping the starting index of the first triangle in the mesh and the triangle count as objects built into that geometry's metadata on the CPU side. Only in `pathtraceInit` does the memory get `cudaMalloc`'d and `cudaMemcpy`'d into the `dev_triangles` device array.
 - Now that the geometry is represented on the device as an array of triangles, I implemented a new test in `intersections.cu`, `meshIntersectionTest()` and its helpers `triangleIntersect` and `enterBox`. `triangleIntersect` is an implementation of `glm::intersectRayTriangle` which takes the ray origin and the triangle's three vertices and returns a bool of whether the ray hits this particular triangle, along with setting barycentric coordinates and the ray length `t` as input reference parameters. 
@@ -197,7 +196,10 @@ Below, we can see the results from Nsight Systems profiling, showing that prior 
 And as a funny comment, this is the result upon launching without BVH turned on:
 
 
+<p align="center">
 
+<img src="img/without_bvh.png" width="500">
+</p>
 
 
 ## References
