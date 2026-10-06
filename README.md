@@ -170,6 +170,35 @@ struct BVHNode {
 </tr>
 </table>
 
+Below, we can see the results from Nsight Systems profiling, showing that prior to introduction of BVH,the computeIntersections kernel took up virtually all of the time of the program, and you can see it being reduced to 91.5% of the GPU time. Note that this is a stacked 100% graph, as you wouldn't be able to even see the RHS bar on the chart otherwise.
+
+<table>
+<tr>
+<td>
+
+| Kernel                | BVH off | BVH on |
+|-----------------------|--------:|-------:|
+| computeIntersections  | 99.95%  | 91.5%  |
+| shadeRealMaterial     | 0.02%   | 4.6%   |
+| Stream compaction     | 0.01%   | 1.6%   |
+| generateRayFromCamera | 0.01%   | 1.0%   |
+| newGather             | 0.01%   | 1.0%   |
+| sendImageToPBO        | 0.00%   | 0.2%   |
+| **ms per iteration**  | **4212** | **21.2** |
+
+</td>
+<td>
+<img src="img/nsight_kernel.png" width="500">
+</td>
+</tr>
+</table>
+
+
+And as a funny comment, this is the result upon launching without BVH turned on:
+
+
+
+
 
 ## References
 - [tinygltf](https://github.com/syoyo/tinygltf) (v3 C API: `tiny_gltf_v3.h`,
